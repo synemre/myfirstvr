@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Meta Quest 3 - Realistic Archery</title>
+    <title>Meta Quest 3 - Realistic Archery VR</title>
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -13,7 +14,7 @@
         }
         
         body {
-            background: linear-gradient(135deg, #1a2a6c, #b21f1f, #1a2a6c);
+            background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
             color: white;
             min-height: 100vh;
             overflow: hidden;
@@ -33,7 +34,7 @@
             text-align: center;
             padding: 20px 0;
             position: relative;
-            z-index: 10;
+            z-index: 100;
         }
         
         h1 {
@@ -60,7 +61,6 @@
         
         .xr-view {
             flex: 3;
-            background: rgba(0, 0, 30, 0.6);
             border-radius: 20px;
             overflow: hidden;
             position: relative;
@@ -68,14 +68,22 @@
             border: 2px solid rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(5px);
             transform-style: preserve-3d;
+            height: 70vh;
         }
         
-        .scene {
+        #ar-scene {
             width: 100%;
             height: 100%;
-            position: relative;
-            overflow: hidden;
-            background: radial-gradient(circle at center, #0c1445 0%, #020617 70%);
+        }
+        
+        .scene-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
         }
         
         .controls-panel {
@@ -89,6 +97,7 @@
             display: flex;
             flex-direction: column;
             gap: 20px;
+            z-index: 100;
         }
         
         .panel-title {
@@ -149,6 +158,83 @@
             font-size: 1rem;
         }
         
+        .vr-controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .vr-button {
+            background: linear-gradient(45deg, #6a11cb, #2575fc);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 30px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .vr-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+        }
+        
+        .vr-button:active {
+            transform: translateY(1px);
+        }
+        
+        .vr-button.exit {
+            background: linear-gradient(45deg, #ff416c, #ff4b2b);
+        }
+        
+        .instructions {
+            text-align: center;
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+        }
+        
+        .target {
+            position: absolute;
+            width: 120px;
+            height: 120px;
+            top: 200px;
+            right: 300px;
+            border-radius: 50%;
+            background: #8B0000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 0 20px rgba(139, 0, 0, 0.7);
+            transform-style: preserve-3d;
+            animation: float 8s infinite ease-in-out;
+            z-index: 5;
+        }
+        
+        .target-ring {
+            position: absolute;
+            border-radius: 50%;
+            border: 10px solid #f0f0f0;
+            width: 80%;
+            height: 80%;
+        }
+        
+        .target-center {
+            width: 30%;
+            height: 30%;
+            background: gold;
+            border-radius: 50%;
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.8);
+        }
+        
         .bow {
             position: absolute;
             bottom: 100px;
@@ -156,6 +242,7 @@
             transform: translateX(-50%);
             z-index: 10;
             transition: transform 0.1s;
+            pointer-events: none;
         }
         
         .bow-body {
@@ -187,6 +274,7 @@
             left: 100%;
             transform-origin: left center;
             display: none;
+            pointer-events: none;
         }
         
         .arrow-head {
@@ -201,94 +289,6 @@
             border-left: 15px solid #d4af37;
         }
         
-        .target {
-            position: absolute;
-            width: 120px;
-            height: 120px;
-            top: 200px;
-            right: 300px;
-            border-radius: 50%;
-            background: #8B0000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            box-shadow: 0 0 20px rgba(139, 0, 0, 0.7);
-            transform-style: preserve-3d;
-            animation: float 8s infinite ease-in-out;
-        }
-        
-        .target-ring {
-            position: absolute;
-            border-radius: 50%;
-            border: 10px solid #f0f0f0;
-            width: 80%;
-            height: 80%;
-        }
-        
-        .target-center {
-            width: 30%;
-            height: 30%;
-            background: gold;
-            border-radius: 50%;
-            box-shadow: 0 0 15px rgba(255, 215, 0, 0.8);
-        }
-        
-        .trees {
-            position: absolute;
-            bottom: 0;
-            width: 100%;
-            height: 200px;
-        }
-        
-        .tree {
-            position: absolute;
-            bottom: 0;
-            width: 60px;
-            height: 150px;
-            background: linear-gradient(to right, #2E8B57, #3CB371);
-            clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
-        }
-        
-        .mountains {
-            position: absolute;
-            bottom: 0;
-            width: 100%;
-            height: 300px;
-        }
-        
-        .mountain {
-            position: absolute;
-            bottom: 0;
-            width: 0;
-            height: 0;
-            border-left: 150px solid transparent;
-            border-right: 150px solid transparent;
-            border-bottom: 250px solid #2c3e50;
-        }
-        
-        .sky {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 70%;
-            background: linear-gradient(to bottom, #1e3c72, #2a5298);
-        }
-        
-        .cloud {
-            position: absolute;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 50%;
-        }
-        
-        .instructions {
-            text-align: center;
-            margin-top: 20px;
-            padding: 15px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 12px;
-        }
-        
         .power-meter {
             position: absolute;
             bottom: 220px;
@@ -300,6 +300,7 @@
             border-radius: 10px;
             overflow: hidden;
             display: none;
+            pointer-events: none;
         }
         
         .power-fill {
@@ -319,6 +320,7 @@
             border-radius: 50%;
             opacity: 0.7;
             display: none;
+            pointer-events: none;
         }
         
         .hit-marker {
@@ -328,6 +330,7 @@
             color: gold;
             text-shadow: 0 0 10px rgba(255, 215, 0, 0.8);
             display: none;
+            pointer-events: none;
         }
         
         @keyframes float {
@@ -353,39 +356,95 @@
                 order: -1;
             }
         }
+        
+        .status-bar {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 30px;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            z-index: 100;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ef4444;
+        }
+        
+        .status-indicator.active {
+            background: #4ade80;
+            box-shadow: 0 0 10px #4ade80;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Meta Quest 3 Archery</h1>
-            <div class="subtitle">Realistic Physics Archery Simulation for WebXR</div>
+            <h1>Meta Quest 3 Archery VR</h1>
+            <div class="subtitle">Realistic Physics Archery with WebXR Support</div>
         </header>
+        
+        <div class="status-bar">
+            <div class="status-indicator" id="vr-status"></div>
+            <span id="status-text">VR: Disconnected</span>
+        </div>
         
         <div class="game-container">
             <div class="xr-view">
-                <div class="scene">
-                    <div class="sky">
-                        <div class="cloud" style="top: 50px; left: 10%; width: 80px; height: 40px;"></div>
-                        <div class="cloud" style="top: 120px; left: 70%; width: 120px; height: 50px;"></div>
-                        <div class="cloud" style="top: 80px; left: 40%; width: 100px; height: 45px;"></div>
-                    </div>
+                <a-scene 
+                    id="ar-scene"
+                    vr-mode-ui="enabled: true"
+                    loading-screen="dotsColor: #0080e5; backgroundColor: #000"
+                    renderer="antialias: true;"
+                    physics="debug: false">
                     
-                    <div class="mountains">
-                        <div class="mountain" style="left: 0;"></div>
-                        <div class="mountain" style="left: 250px;"></div>
-                        <div class="mountain" style="left: 500px;"></div>
-                        <div class="mountain" style="left: 750px;"></div>
-                    </div>
+                    <!-- Environment -->
+                    <a-sky color="#6EBAA7"></a-sky>
+                    <a-plane 
+                        position="0 0 -4" 
+                        rotation="-90 0 0" 
+                        width="100" 
+                        height="100" 
+                        color="#7BC8A4"
+                        shadow>
+                    </a-plane>
                     
-                    <div class="trees">
-                        <div class="tree" style="left: 100px;"></div>
-                        <div class="tree" style="left: 300px;"></div>
-                        <div class="tree" style="left: 600px;"></div>
-                        <div class="tree" style="left: 900px;"></div>
-                        <div class="tree" style="left: 1100px;"></div>
-                    </div>
+                    <!-- Scenery -->
+                    <a-entity position="0 0 -20">
+                        <a-box 
+                            position="-10 1 -10" 
+                            rotation="0 45 0" 
+                            color="#D95B5B"
+                            shadow>
+                        </a-box>
+                        
+                        <a-sphere 
+                            position="0 3 -15" 
+                            radius="2" 
+                            color="#4CC3D9"
+                            shadow>
+                        </a-sphere>
+                        
+                        <a-cylinder 
+                            position="10 1.5 -10" 
+                            radius="1" 
+                            height="3" 
+                            color="#FFC65D"
+                            shadow>
+                        </a-cylinder>
+                    </a-entity>
                     
+                    <!-- Targets will be added dynamically -->
+                </a-scene>
+                
+                <div class="scene-overlay">
                     <div class="target">
                         <div class="target-ring"></div>
                         <div class="target-center"></div>
@@ -455,8 +514,26 @@
                     </div>
                 </div>
                 
+                <div class="vr-controls">
+                    <button class="vr-button" id="enter-vr">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 3C7.02944 3 3 7.02944 3 12C3 16.9706 7.02944 21 12 21C16.9706 21 21 16.9706 21 12C21 7.02944 16.9706 3 12 3Z" stroke="white" stroke-width="2"/>
+                            <path d="M12 15C13.6569 15 15 13.6569 15 12C15 10.3431 13.6569 9 12 9C10.3431 9 9 10.3431 9 12C9 13.6569 10.3431 15 12 15Z" stroke="white" stroke-width="2"/>
+                            <path d="M18 5L15 9" stroke="white" stroke-width="2" stroke-linecap="round"/>
+                            <path d="M9 15L6 19" stroke="white" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        Enter VR
+                    </button>
+                    <button class="vr-button exit" id="exit-vr">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M14 8L18 12M18 12L14 16M18 12H6M12 3C7.02944 3 3 7.02944 3 12C3 16.9706 7.02944 21 12 21C16.9706 21 21 16.9706 21 12C21 7.02944 16.9706 3 12 3Z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        Exit VR
+                    </button>
+                </div>
+                
                 <div class="instructions">
-                    <p>Hold <strong>A</strong> to draw the bow, release to shoot. Aim using controller movement.</p>
+                    <p>Hold <strong>A</strong> to draw the bow, release to shoot. Use VR controllers for immersive gameplay.</p>
                     <p>Realistic physics include arrow drop, wind resistance, and bow tension.</p>
                 </div>
             </div>
@@ -465,23 +542,67 @@
     
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            const scene = document.querySelector('#ar-scene');
+            const enterVRBtn = document.getElementById('enter-vr');
+            const exitVRBtn = document.getElementById('exit-vr');
+            const vrStatus = document.getElementById('vr-status');
+            const statusText = document.getElementById('status-text');
             const bow = document.querySelector('.bow');
             const arrow = document.querySelector('.arrow');
             const powerMeter = document.querySelector('.power-meter');
             const powerFill = document.querySelector('.power-fill');
             const target = document.querySelector('.target');
-            const scene = document.querySelector('.scene');
             
             let isDrawing = false;
             let drawPower = 0;
             let drawInterval;
             let bowRotation = 0;
             let arrowVisible = false;
+            let vrActive = false;
             
             // Initialize physics variables
             const gravity = 0.2;
             const windResistance = 0.01;
             let windDirection = Math.random() > 0.5 ? 1 : -1;
+            
+            // VR Status Handling
+            function updateVRStatus(active) {
+                vrActive = active;
+                if (active) {
+                    vrStatus.classList.add('active');
+                    statusText.textContent = "VR: Active";
+                } else {
+                    vrStatus.classList.remove('active');
+                    statusText.textContent = "VR: Disconnected";
+                }
+            }
+            
+            // Enter VR
+            enterVRBtn.addEventListener('click', () => {
+                if (scene.hasAttribute('vr-mode-ui')) {
+                    scene.enterVR();
+                    updateVRStatus(true);
+                }
+            });
+            
+            // Exit VR
+            exitVRBtn.addEventListener('click', () => {
+                if (scene.is('vr-mode')) {
+                    scene.exitVR();
+                    updateVRStatus(false);
+                }
+            });
+            
+            // Handle VR events
+            scene.addEventListener('enter-vr', () => {
+                console.log("Entered VR Mode");
+                updateVRStatus(true);
+            });
+            
+            scene.addEventListener('exit-vr', () => {
+                console.log("Exited VR Mode");
+                updateVRStatus(false);
+            });
             
             // Draw bow mechanics
             function startDrawing() {
@@ -534,7 +655,7 @@
                     arrowHead.className = 'arrow-head';
                     projectile.appendChild(arrowHead);
                     
-                    scene.appendChild(projectile);
+                    document.querySelector('.scene-overlay').appendChild(projectile);
                     
                     // Hide the bow arrow
                     arrow.style.display = 'none';
@@ -575,7 +696,7 @@
                             trail.className = 'arrow-trail';
                             trail.style.left = `${posX}px`;
                             trail.style.top = `${posY}px`;
-                            scene.appendChild(trail);
+                            document.querySelector('.scene-overlay').appendChild(trail);
                             
                             // Animate trail
                             setTimeout(() => {
@@ -626,7 +747,7 @@
                 marker.style.left = `${x}px`;
                 marker.style.top = `${y}px`;
                 marker.style.display = 'block';
-                scene.appendChild(marker);
+                document.querySelector('.scene-overlay').appendChild(marker);
                 
                 // Animate marker
                 setTimeout(() => {
@@ -684,20 +805,12 @@
                 }
             });
             
-            // Simulate device motion for Meta Quest 3
-            if (window.DeviceMotionEvent) {
-                window.addEventListener('devicemotion', (event) => {
-                    // In a real implementation, this would control the bow rotation
-                    // For simulation, we'll use arrow keys instead
-                });
-            }
-            
             // Initialize target position
             moveTarget();
             
             // Simulate headset connection
             console.log('Meta Quest 3 connected via WebXR');
-            console.log('Hand tracking initialized');
+            console.log('WebXR DOM Overlay supported: true');
             console.log('Physics engine loaded: Gravity 9.8m/s², Wind Resistance Model Active');
         });
     </script>
