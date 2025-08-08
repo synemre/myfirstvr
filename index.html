@@ -1,50 +1,373 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8">
-    <title>My First VR Game</title>
-    <meta name="description" content="A simple VR scene using A-Frame.">
-    <!-- A-Frame VR library -->
+<head>
+    <title>Realistic Archery VR</title>
+    <meta name="description" content="A realistic archery game for Meta Quest 3 using A-Frame.">
     <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
-  </head>
-  <body>
-    <!-- This is your VR scene. All of your 3D objects go in here. -->
-    <a-scene>
-      <!-- Background: A 360-degree sky color. -->
-      <a-sky color="#6EBAA7"></a-sky>
+    <script>
+        // Constants
+        const DRAW_THRESHOLD = 0.1; // How far back the arrow needs to be to be considered 'drawn'
+        const MAX_DRAW = 0.8; // Maximum draw distance for the bow string
+        const SHOT_POWER_MULTIPLIER = 70; // Multiplier for arrow velocity
+        const ARROW_GRAVITY = -9.8;
+        const WIND_STRENGTH = 0.4; // Max wind strength
 
-      <!-- Floor: A flat plane rotated to be horizontal. -->
-      <a-plane 
-        position="0 0 -4" 
-        rotation="-90 0 0" 
-        width="10" 
-        height="10" 
-        color="#7BC8A4">
-      </a-plane>
+        // Component to manage the bow and arrow logic
+        AFRAME.registerComponent('archery-system', {
+            schema: {
+                bowId: {type: 'string', default: '#bow'},
+                arrowHandId: {type: 'string', default: '#arrow-hand'},
+                bowHandId: {type: 'string', default: '#bow-hand'},
+                nockingSoundId: {type: 'string', default: '#nock_sound'},
+                releaseSoundId: {type: 'string', default: '#release_sound'},
+                drawSoundId: {type: 'string', default: '#draw_sound'}
+            },
 
-      <!-- A red box. -->
-      <!-- position is "x y z". The negative z value moves it in front of you. -->
-      <a-box 
-        position="-1 0.5 -3" 
-        rotation="0 45 0" 
-        color="#D95B5B">
-      </a-box>
+            init: function () {
+                this.bow = document.querySelector(this.data.bowId);
+                this.arrowHand = document.querySelector(this.data.arrowHandId);
+                this.bowHand = document.querySelector(this.data.bowHandId);
+                this.sceneEl = this.el;
+                this.cameraEl = document.querySelector('#camera');
 
-      <!-- A blue sphere. -->
-      <a-sphere 
-        position="0 1.25 -5" 
-        radius="1.25" 
-        color="#4CC3D9">
-      </a-sphere>
+                // Sounds
+                this.nockingSound = document.querySelector(this.data.nockingSoundId);
+                this.releaseSound = document.querySelector(this.data.releaseSoundId);
+                this.drawSound = document.querySelector(this.data.drawSoundId);
 
-      <!-- A yellow cylinder. -->
-      <a-cylinder 
-        position="1 0.75 -3" 
-        radius="0.5" 
-        height="1.5" 
-        color="#FFC65D">
-      </a-cylinder>
+                this.state = 'IDLE'; // IDLE, NOCKING, DRAWING
+                this.currentArrow = null;
+                this.drawPower = 0;
+                this.wind = new THREE.Vector3(
+                    (Math.random() - 0.5) * WIND_STRENGTH,
+                    0,
+                    (Math.random() - 0.5) * WIND_STRENGTH
+                );
+
+                this.bindMethods();
+                this.addEventListeners();
+                this.createWindIndicator();
+            },
+
+            bindMethods: function() {
+                this.handleGripDown = this.handleGripDown.bind(this);
+                this.handleGripUp = this.handleGripUp.bind(this);
+            },
+
+            addEventListeners: function() {
+                this.arrowHand.addEventListener('gripdown', this.handleGripDown);
+                this.arrowHand.addEventListener('gripup', this.handleGripUp);
+            },
+
+            handleGripDown: function() {
+                if (this.state === 'IDLE') {
+                    this.state = 'NOCKING';
+                    this.spawnArrow();
+                }
+            },
+
+            handleGripUp: function() {
+                if (this.state === 'DRAWING' && this.currentArrow) {
+                    this.shootArrow();
+                } else if (this.state === 'NOCKING' && this.currentArrow) {
+                    // If grip is released before drawing, remove the arrow
+                    this.currentArrow.parentNode.removeChild(this.currentArrow);
+                    this.currentArrow = null;
+                    this.state = 'IDLE';
+                }
+            },
+
+            spawnArrow: function() {
+                this.currentArrow = document.createElement('a-entity');
+                this.currentArrow.setAttribute('gltf-model', '#arrow_model');
+                this.currentArrow.setAttribute('scale', '0.04 0.04 0.04');
+                this.arrowHand.appendChild(this.currentArrow);
+                this.state = 'NOCKING';
+            },
+
+            shootArrow: function() {
+                if (!this.currentArrow) return;
+
+                // Detach arrow from hand and add to scene
+                const arrowWorldPosition = new THREE.Vector3();
+                const arrowWorldQuaternion = new THREE.Quaternion();
+                this.currentArrow.object3D.getWorldPosition(arrowWorldPosition);
+                this.currentArrow.object3D.getWorldQuaternion(arrowWorldQuaternion);
+
+                this.sceneEl.object3D.add(this.currentArrow.object3D);
+                this.currentArrow.object3D.position.copy(arrowWorldPosition);
+                this.currentArrow.object3D.quaternion.copy(arrowWorldQuaternion);
+
+                // Calculate velocity
+                const direction = new THREE.Vector3(0, 0, -1);
+                direction.applyQuaternion(arrowWorldQuaternion);
+                const velocity = direction.multiplyScalar(this.drawPower * SHOT_POWER_MULTIPLIER);
+
+                this.currentArrow.setAttribute('dynamic-body', {
+                    shape: 'box',
+                    mass: 0.1,
+                    linearDamping: 0.05,
+                    angularDamping: 0.05
+                });
+                
+                // Set up arrow physics component
+                this.currentArrow.setAttribute('arrow-physics', {
+                    initialVelocity: `${velocity.x} ${velocity.y} ${velocity.z}`,
+                    wind: `${this.wind.x} ${this.wind.y} ${this.wind.z}`
+                });
+                
+                this.releaseSound.play();
+                this.drawSound.pause();
+                this.drawSound.currentTime = 0;
+                
+                // Reset state
+                this.currentArrow = null;
+                this.state = 'IDLE';
+                this.drawPower = 0;
+                this.updateBowstring(0);
+            },
+
+            tick: function() {
+                if (this.state === 'NOCKING' || this.state === 'DRAWING') {
+                    this.handleArrowNockingAndDrawing();
+                }
+            },
+
+            handleArrowNockingAndDrawing: function() {
+                if (!this.currentArrow) return;
+
+                const bowStringPosition = new THREE.Vector3();
+                this.bow.object3D.getWorldPosition(bowStringPosition);
+                bowStringPosition.z += 0.05; // Nocking point on the string
+
+                const arrowHandPosition = new THREE.Vector3();
+                this.arrowHand.object3D.getWorldPosition(arrowHandPosition);
+
+                const distance = bowStringPosition.distanceTo(arrowHandPosition);
+
+                // Check if arrow is close enough to the nocking point
+                if (distance < 0.15 && this.state === 'NOCKING') {
+                    this.nockArrow();
+                }
+
+                if (this.state === 'DRAWING') {
+                    this.updateDraw(bowStringPosition, arrowHandPosition);
+                }
+            },
+
+            nockArrow: function() {
+                this.state = 'DRAWING';
+                this.nockingSound.play();
+                this.drawSound.play();
+                
+                // Parent arrow to the bow hand for stable drawing
+                const arrowLocalPosition = this.bowHand.object3D.worldToLocal(this.arrowHand.object3D.position.clone());
+                this.currentArrow.object3D.position.copy(arrowLocalPosition);
+                this.bowHand.appendChild(this.currentArrow);
+            },
+
+            updateDraw: function(bowStringPosition, arrowHandPosition) {
+                const bowHandPosition = new THREE.Vector3();
+                this.bowHand.object3D.getWorldPosition(bowHandPosition);
+
+                // Calculate draw distance relative to the bow hand's forward direction
+                const drawVector = arrowHandPosition.clone().sub(bowHandPosition);
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.bowHand.object3D.quaternion);
+                
+                // Project drawVector onto the forward vector to get the draw distance
+                let drawDistance = -drawVector.dot(forward);
+                drawDistance = Math.max(0, Math.min(drawDistance, MAX_DRAW));
+
+                this.drawPower = drawDistance / MAX_DRAW;
+                
+                // Haptic feedback based on draw power
+                if (this.arrowHand.components['haptics']) {
+                    this.arrowHand.components.haptics.pulse(this.drawPower * 0.5, 50);
+                }
+
+                // Update arrow position to follow the drawing hand
+                const localPos = this.bowHand.object3D.worldToLocal(arrowHandPosition.clone());
+                this.currentArrow.object3D.position.copy(localPos);
+                
+                // Aim the arrow
+                const cameraPosition = new THREE.Vector3();
+                this.cameraEl.object3D.getWorldPosition(cameraPosition);
+                this.currentArrow.object3D.lookAt(cameraPosition);
+
+                this.updateBowstring(drawDistance);
+            },
+
+            updateBowstring: function(drawDistance) {
+                const bowstring = this.bow.getObjectByName('bowstring');
+                if (bowstring) {
+                    const line = bowstring.getObjectByName('line');
+                    const positions = line.geometry.attributes.position.array;
+                    positions[4] = -drawDistance; // Pull back the center of the string
+                    line.geometry.attributes.position.needsUpdate = true;
+                }
+            },
+
+            createWindIndicator: function() {
+                const windIndicator = document.createElement('a-entity');
+                windIndicator.setAttribute('position', '0 1.2 -1.5');
+                this.cameraEl.appendChild(windIndicator);
+
+                const cone = document.createElement('a-cone');
+                cone.setAttribute('color', '#FF5733');
+                cone.setAttribute('height', '0.2');
+                cone.setAttribute('radius-bottom', '0.05');
+                cone.setAttribute('radius-top', '0');
+                
+                const windDirection = this.wind.clone().normalize();
+                cone.object3D.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), windDirection);
+                
+                windIndicator.appendChild(cone);
+
+                const text = document.createElement('a-text');
+                text.setAttribute('value', 'Wind');
+                text.setAttribute('align', 'center');
+                text.setAttribute('position', '0 0.2 0');
+                text.setAttribute('width', '2');
+                windIndicator.appendChild(text);
+            }
+        });
+
+        // Component to manage arrow physics after being shot
+        AFRAME.registerComponent('arrow-physics', {
+            schema: {
+                initialVelocity: {type: 'vec3'},
+                wind: {type: 'vec3'}
+            },
+
+            init: function () {
+                this.velocity = new THREE.Vector3().copy(this.data.initialVelocity);
+                this.windForce = new THREE.Vector3().copy(this.data.wind);
+                this.stuck = false;
+
+                this.el.addEventListener('body-loaded', () => {
+                    this.body = this.el.body;
+                    this.body.velocity.copy(this.velocity);
+                    this.body.addEventListener('collide', (e) => {
+                        if (this.stuck) return;
+                        
+                        // Check if it's a target
+                        if (e.body.el.classList.contains('target')) {
+                            this.stickInTarget(e.body.el);
+                        }
+                    });
+                });
+            },
+
+            stickInTarget: function(targetEl) {
+                this.stuck = true;
+                this.el.removeAttribute('dynamic-body');
+                
+                // Calculate score
+                const hitPoint = this.el.object3D.position.clone();
+                const targetCenter = targetEl.object3D.position.clone();
+                const distance = hitPoint.distanceTo(targetCenter);
+                
+                let score = 0;
+                if (distance < 0.1) score = 100;
+                else if (distance < 0.2) score = 50;
+                else if (distance < 0.3) score = 25;
+                else if (distance < 0.5) score = 10;
+
+                // Display score
+                const scoreText = document.createElement('a-text');
+                scoreText.setAttribute('value', `${score} pts`);
+                scoreText.setAttribute('position', '0 0.2 0');
+                scoreText.setAttribute('align', 'center');
+                scoreText.setAttribute('color', 'yellow');
+                scoreText.setAttribute('width', '4');
+                this.el.appendChild(scoreText);
+
+                // Make arrow a child of the target to stick to it
+                const worldPos = new THREE.Vector3();
+                const worldQuat = new THREE.Quaternion();
+                this.el.object3D.getWorldPosition(worldPos);
+                this.el.object3D.getWorldQuaternion(worldQuat);
+
+                targetEl.object3D.add(this.el.object3D);
+                
+                const localPos = targetEl.object3D.worldToLocal(worldPos);
+                this.el.object3D.position.copy(localPos);
+            },
+
+            tick: function (time, timeDelta) {
+                if (this.stuck || !this.body) return;
+                
+                // Apply gravity
+                this.body.velocity.y += ARROW_GRAVITY * (timeDelta / 1000);
+
+                // Apply wind
+                this.body.velocity.add(this.windForce.clone().multiplyScalar(timeDelta / 1000));
+                
+                // Arrow alignment with velocity
+                const currentVelocity = this.body.velocity.clone();
+                if (currentVelocity.lengthSq() > 0.001) {
+                    this.el.object3D.quaternion.setFromUnitVectors(
+                        new THREE.Vector3(0, 0, -1),
+                        currentVelocity.normalize()
+                    );
+                }
+            }
+        });
+
+    </script>
+</head>
+<body>
+    <a-scene physics="driver: local; gravity: 0;" archery-system>
+        <a-assets>
+            <a-asset-item id="bow_model" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/bow.glb?v=1678811394522"></a-asset-item>
+            <a-asset-item id="arrow_model" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/arrow.glb?v=1678811391218"></a-asset-item>
+            <audio id="nock_sound" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/arrow_nock.mp3?v=1678812933181" preload="auto"></audio>
+            <audio id="release_sound" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/bow_release.mp3?v=1678812936752" preload="auto"></audio>
+            <audio id="draw_sound" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/bow_draw.mp3?v=1678812939893" preload="auto" loop="true"></audio>
+            <img id="sky" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/sky.jpg?v=1678813533434">
+            <img id="grass" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/grass.jpg?v=1678813536831">
+        </a-assets>
+
+        <!-- Player Rig -->
+        <a-entity id="player">
+            <a-camera id="camera" position="0 1.6 0">
+                <a-entity cursor="fuse: false;"
+                          position="0 0 -1"
+                          geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03;"
+                          material="color: black; shader: flat"
+                          visible="false">
+                </a-entity>
+            </a-camera>
+            <a-entity id="bow-hand" oculus-touch-controls="hand: left" haptics>
+                <a-entity id="bow" gltf-model="#bow_model" position="0 0 -0.2" rotation="0 90 0" scale="0.04 0.04 0.04">
+                    <!-- Bowstring -->
+                    <a-entity class="bowstring" line="start: 0 1.5 0; end: 0 -1.5 0; color: black" position="0 0 0.05">
+                    </a-entity>
+                </a-entity>
+            </a-entity>
+            <a-entity id="arrow-hand" oculus-touch-controls="hand: right" haptics></a-entity>
+        </a-entity>
+
+        <!-- Environment -->
+        <a-sky src="#sky"></a-sky>
+        <a-plane src="#grass" repeat="100 100" position="0 0 -4" rotation="-90 0 0" height="100" width="100" static-body></a-plane>
+        
+        <!-- Targets -->
+        <a-cylinder class="target" color="#ff0000" radius="0.5" height="0.1" position="0 1.6 -20" static-body></a-cylinder>
+        <a-cylinder class="target" color="#ffff00" radius="0.3" height="0.1" position="0 1.6 -20.01" static-body></a-cylinder>
+        <a-cylinder class="target" color="#00ff00" radius="0.2" height="0.1" position="0 1.6 -20.02" static-body></a-cylinder>
+        <a-cylinder class="target" color="#0000ff" radius="0.1" height="0.1" position="0 1.6 -20.03" static-body></a-cylinder>
+
+        <a-cylinder class="target" color="#ff0000" radius="0.5" height="0.1" position="-10 1.6 -40" static-body></a-cylinder>
+        <a-cylinder class="target" color="#ffff00" radius="0.3" height="0.1" position="-10 1.6 -40.01" static-body></a-cylinder>
+        <a-cylinder class="target" color="#00ff00" radius="0.2" height="0.1" position="-10 1.6 -40.02" static-body></a-cylinder>
+        <a-cylinder class="target" color="#0000ff" radius="0.1" height="0.1" position="-10 1.6 -40.03" static-body></a-cylinder>
+
+        <a-cylinder class="target" color="#ff0000" radius="0.5" height="0.1" position="15 3 -60" static-body></a-cylinder>
+        <a-cylinder class="target" color="#ffff00" radius="0.3" height="0.1" position="15 3 -60.01" static-body></a-cylinder>
+        <a-cylinder class="target" color="#00ff00" radius="0.2" height="0.1" position="15 3 -60.02" static-body></a-cylinder>
+        <a-cylinder class="target" color="#0000ff" radius="0.1" height="0.1" position="15 3 -60.03" static-body></a-cylinder>
 
     </a-scene>
-  </body>
+</body>
 </html>
