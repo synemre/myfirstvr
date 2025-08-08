@@ -1,373 +1,483 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Realistic Archery VR</title>
-    <meta name="description" content="A realistic archery game for Meta Quest 3 using A-Frame.">
-    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
-    <script>
-        // Constants
-        const DRAW_THRESHOLD = 0.1; // How far back the arrow needs to be to be considered 'drawn'
-        const MAX_DRAW = 0.8; // Maximum draw distance for the bow string
-        const SHOT_POWER_MULTIPLIER = 70; // Multiplier for arrow velocity
-        const ARROW_GRAVITY = -9.8;
-        const WIND_STRENGTH = 0.4; // Max wind strength
+  <meta charset="utf-8" />
+  <title>Realistic Archery VR — A-Frame</title>
+  <meta name="description" content="Realistic Archery VR for Meta Quest 3 using A-Frame" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-        // Component to manage the bow and arrow logic
-        AFRAME.registerComponent('archery-system', {
-            schema: {
-                bowId: {type: 'string', default: '#bow'},
-                arrowHandId: {type: 'string', default: '#arrow-hand'},
-                bowHandId: {type: 'string', default: '#bow-hand'},
-                nockingSoundId: {type: 'string', default: '#nock_sound'},
-                releaseSoundId: {type: 'string', default: '#release_sound'},
-                drawSoundId: {type: 'string', default: '#draw_sound'}
-            },
+  <!-- A-Frame -->
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
 
-            init: function () {
-                this.bow = document.querySelector(this.data.bowId);
-                this.arrowHand = document.querySelector(this.data.arrowHandId);
-                this.bowHand = document.querySelector(this.data.bowHandId);
-                this.sceneEl = this.el;
-                this.cameraEl = document.querySelector('#camera');
+  <style>
+    body { margin: 0; font-family: sans-serif; }
+  </style>
 
-                // Sounds
-                this.nockingSound = document.querySelector(this.data.nockingSoundId);
-                this.releaseSound = document.querySelector(this.data.releaseSoundId);
-                this.drawSound = document.querySelector(this.data.drawSoundId);
+  <script>
+    // Configuration constants
+    const MAX_DRAW = 0.9;               // meters
+    const SHOT_POWER_MULTIPLIER = 55;   // tune for speed feel
+    const GRAVITY = -9.81;              // m/s^2
+    const WIND_MAX = 0.6;               // max wind magnitude
+    const ARROW_MASS = 0.05;            // inertia feel
+    const ARROW_LENGTH = 0.6;           // used for tip calculation (approx)
 
-                this.state = 'IDLE'; // IDLE, NOCKING, DRAWING
-                this.currentArrow = null;
-                this.drawPower = 0;
-                this.wind = new THREE.Vector3(
-                    (Math.random() - 0.5) * WIND_STRENGTH,
-                    0,
-                    (Math.random() - 0.5) * WIND_STRENGTH
-                );
+    // Archery system: handles spawn, draw, shoot
+    AFRAME.registerComponent('archery-system', {
+      schema: {
+        bow: {type: 'selector', default: '#bow'},
+        bowHand: {type: 'selector', default: '#bow-hand'},
+        arrowHand: {type: 'selector', default: '#arrow-hand'},
+        camera: {type: 'selector', default: '#camera'},
+        arrowModel: {type: 'selector', default: '#arrow_model'},
+        nockSound: {type: 'selector', default: '#nock_sound'},
+        releaseSound: {type: 'selector', default: '#release_sound'},
+        drawSound: {type: 'selector', default: '#draw_sound'}
+      },
+      init: function () {
+        this.state = 'IDLE'; // IDLE, NOCKING, DRAWING
+        this.currentArrow = null;
+        this.drawDistance = 0;
+        this.wind = new THREE.Vector3(
+          (Math.random()-0.5) * WIND_MAX,
+          (Math.random()-0.2) * 0.1, // small vertical gusts are OK
+          (Math.random()-0.5) * WIND_MAX
+        );
 
-                this.bindMethods();
-                this.addEventListeners();
-                this.createWindIndicator();
-            },
+        // small "string center" visual that will be pulled
+        this.stringCenter = document.createElement('a-sphere');
+        this.stringCenter.setAttribute('radius', '0.02');
+        this.stringCenter.setAttribute('color', '#222');
+        this.stringCenter.setAttribute('position', '0 0 0.05'); // relative to bow model
+        // put it inside bow entity once bow is ready
+        if (this.data.bow) {
+          this.data.bow.appendChild(this.stringCenter);
+        } else {
+          console.warn('Bow not found for archery-system');
+        }
 
-            bindMethods: function() {
-                this.handleGripDown = this.handleGripDown.bind(this);
-                this.handleGripUp = this.handleGripUp.bind(this);
-            },
+        // cache references
+        this.bowEl = this.data.bow;
+        this.bowHandEl = this.data.bowHand;
+        this.arrowHandEl = this.data.arrowHand;
+        this.cameraEl = this.data.camera;
 
-            addEventListeners: function() {
-                this.arrowHand.addEventListener('gripdown', this.handleGripDown);
-                this.arrowHand.addEventListener('gripup', this.handleGripUp);
-            },
+        // sounds (may be null)
+        this.nockSound = this.data.nockSound;
+        this.releaseSound = this.data.releaseSound;
+        this.drawSound = this.data.drawSound;
 
-            handleGripDown: function() {
-                if (this.state === 'IDLE') {
-                    this.state = 'NOCKING';
-                    this.spawnArrow();
-                }
-            },
+        // event handlers
+        this.onGripDown = this.onGripDown.bind(this);
+        this.onGripUp = this.onGripUp.bind(this);
 
-            handleGripUp: function() {
-                if (this.state === 'DRAWING' && this.currentArrow) {
-                    this.shootArrow();
-                } else if (this.state === 'NOCKING' && this.currentArrow) {
-                    // If grip is released before drawing, remove the arrow
-                    this.currentArrow.parentNode.removeChild(this.currentArrow);
-                    this.currentArrow = null;
-                    this.state = 'IDLE';
-                }
-            },
+        // attach controller events (oculus-touch-controls emits gripdown/gripup)
+        this.arrowHandEl.addEventListener('gripdown', this.onGripDown);
+        this.arrowHandEl.addEventListener('gripup', this.onGripUp);
 
-            spawnArrow: function() {
-                this.currentArrow = document.createElement('a-entity');
-                this.currentArrow.setAttribute('gltf-model', '#arrow_model');
-                this.currentArrow.setAttribute('scale', '0.04 0.04 0.04');
-                this.arrowHand.appendChild(this.currentArrow);
-                this.state = 'NOCKING';
-            },
+        // create a simple UI text showing wind
+        this.createWindIndicator();
 
-            shootArrow: function() {
-                if (!this.currentArrow) return;
+        // helpful debug
+        this.el.sceneEl.addEventListener('loaded', ()=> {
+          // ensure string visual appended to bow once model is loaded
+          if (this.bowEl && !this.bowEl.querySelector('a-sphere')) {
+            this.bowEl.appendChild(this.stringCenter);
+          }
+        });
+      },
 
-                // Detach arrow from hand and add to scene
-                const arrowWorldPosition = new THREE.Vector3();
-                const arrowWorldQuaternion = new THREE.Quaternion();
-                this.currentArrow.object3D.getWorldPosition(arrowWorldPosition);
-                this.currentArrow.object3D.getWorldQuaternion(arrowWorldQuaternion);
+      createWindIndicator: function() {
+        const container = document.createElement('a-entity');
+        container.setAttribute('position','0 1.5 -0.6');
+        container.setAttribute('rotation','0 0 0');
+        this.cameraEl.appendChild(container);
 
-                this.sceneEl.object3D.add(this.currentArrow.object3D);
-                this.currentArrow.object3D.position.copy(arrowWorldPosition);
-                this.currentArrow.object3D.quaternion.copy(arrowWorldQuaternion);
+        const arrow = document.createElement('a-cone');
+        arrow.setAttribute('height','0.16');
+        arrow.setAttribute('radius-bottom','0.04');
+        arrow.setAttribute('radius-top','0');
+        arrow.setAttribute('position','0 0 0');
+        arrow.setAttribute('color','#FF5733');
+        container.appendChild(arrow);
+        // orient cone to wind direction
+        const dir = this.wind.clone().normalize();
+        const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
+        arrow.object3D.quaternion.copy(quat);
 
-                // Calculate velocity
-                const direction = new THREE.Vector3(0, 0, -1);
-                direction.applyQuaternion(arrowWorldQuaternion);
-                const velocity = direction.multiplyScalar(this.drawPower * SHOT_POWER_MULTIPLIER);
+        const t = document.createElement('a-text');
+        t.setAttribute('value', `Wind: ${this.wind.x.toFixed(2)}, ${this.wind.z.toFixed(2)}`);
+        t.setAttribute('align','center');
+        t.setAttribute('position','0 -0.15 0');
+        t.setAttribute('width','2');
+        container.appendChild(t);
+      },
 
-                this.currentArrow.setAttribute('dynamic-body', {
-                    shape: 'box',
-                    mass: 0.1,
-                    linearDamping: 0.05,
-                    angularDamping: 0.05
-                });
-                
-                // Set up arrow physics component
-                this.currentArrow.setAttribute('arrow-physics', {
-                    initialVelocity: `${velocity.x} ${velocity.y} ${velocity.z}`,
-                    wind: `${this.wind.x} ${this.wind.y} ${this.wind.z}`
-                });
-                
-                this.releaseSound.play();
-                this.drawSound.pause();
-                this.drawSound.currentTime = 0;
-                
-                // Reset state
-                this.currentArrow = null;
-                this.state = 'IDLE';
-                this.drawPower = 0;
-                this.updateBowstring(0);
-            },
+      onGripDown: function () {
+        if (this.state === 'IDLE') {
+          this.spawnArrow();
+        }
+      },
 
-            tick: function() {
-                if (this.state === 'NOCKING' || this.state === 'DRAWING') {
-                    this.handleArrowNockingAndDrawing();
-                }
-            },
+      onGripUp: function () {
+        if (this.state === 'DRAWING' && this.currentArrow) {
+          this.shootArrow();
+        } else if (this.state === 'NOCKING' && this.currentArrow) {
+          // remove arrow if released early
+          this.currentArrow.parentNode.removeChild(this.currentArrow);
+          this.currentArrow = null;
+          this.state = 'IDLE';
+          this.drawDistance = 0;
+          this.updateStringVisual(0);
+          if (this.drawSound) { this.drawSound.pause(); this.drawSound.currentTime = 0; }
+        }
+      },
 
-            handleArrowNockingAndDrawing: function() {
-                if (!this.currentArrow) return;
+      spawnArrow: function () {
+        // spawn a new arrow and parent it to arrow-hand initially
+        const arrow = document.createElement('a-entity');
+        arrow.setAttribute('gltf-model', '#arrow_model');
+        arrow.setAttribute('scale', '0.04 0.04 0.04');
+        arrow.setAttribute('class', 'spawned-arrow');
+        // we want a known local offset so it visually sits in the hand
+        arrow.setAttribute('position','0 0 -0.12');
 
-                const bowStringPosition = new THREE.Vector3();
-                this.bow.object3D.getWorldPosition(bowStringPosition);
-                bowStringPosition.z += 0.05; // Nocking point on the string
+        // small helper attribute to mark that this arrow uses our physics
+        arrow.setAttribute('arrow-physics', 'active: false');
 
-                const arrowHandPosition = new THREE.Vector3();
-                this.arrowHand.object3D.getWorldPosition(arrowHandPosition);
-
-                const distance = bowStringPosition.distanceTo(arrowHandPosition);
-
-                // Check if arrow is close enough to the nocking point
-                if (distance < 0.15 && this.state === 'NOCKING') {
-                    this.nockArrow();
-                }
-
-                if (this.state === 'DRAWING') {
-                    this.updateDraw(bowStringPosition, arrowHandPosition);
-                }
-            },
-
-            nockArrow: function() {
-                this.state = 'DRAWING';
-                this.nockingSound.play();
-                this.drawSound.play();
-                
-                // Parent arrow to the bow hand for stable drawing
-                const arrowLocalPosition = this.bowHand.object3D.worldToLocal(this.arrowHand.object3D.position.clone());
-                this.currentArrow.object3D.position.copy(arrowLocalPosition);
-                this.bowHand.appendChild(this.currentArrow);
-            },
-
-            updateDraw: function(bowStringPosition, arrowHandPosition) {
-                const bowHandPosition = new THREE.Vector3();
-                this.bowHand.object3D.getWorldPosition(bowHandPosition);
-
-                // Calculate draw distance relative to the bow hand's forward direction
-                const drawVector = arrowHandPosition.clone().sub(bowHandPosition);
-                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.bowHand.object3D.quaternion);
-                
-                // Project drawVector onto the forward vector to get the draw distance
-                let drawDistance = -drawVector.dot(forward);
-                drawDistance = Math.max(0, Math.min(drawDistance, MAX_DRAW));
-
-                this.drawPower = drawDistance / MAX_DRAW;
-                
-                // Haptic feedback based on draw power
-                if (this.arrowHand.components['haptics']) {
-                    this.arrowHand.components.haptics.pulse(this.drawPower * 0.5, 50);
-                }
-
-                // Update arrow position to follow the drawing hand
-                const localPos = this.bowHand.object3D.worldToLocal(arrowHandPosition.clone());
-                this.currentArrow.object3D.position.copy(localPos);
-                
-                // Aim the arrow
-                const cameraPosition = new THREE.Vector3();
-                this.cameraEl.object3D.getWorldPosition(cameraPosition);
-                this.currentArrow.object3D.lookAt(cameraPosition);
-
-                this.updateBowstring(drawDistance);
-            },
-
-            updateBowstring: function(drawDistance) {
-                const bowstring = this.bow.getObjectByName('bowstring');
-                if (bowstring) {
-                    const line = bowstring.getObjectByName('line');
-                    const positions = line.geometry.attributes.position.array;
-                    positions[4] = -drawDistance; // Pull back the center of the string
-                    line.geometry.attributes.position.needsUpdate = true;
-                }
-            },
-
-            createWindIndicator: function() {
-                const windIndicator = document.createElement('a-entity');
-                windIndicator.setAttribute('position', '0 1.2 -1.5');
-                this.cameraEl.appendChild(windIndicator);
-
-                const cone = document.createElement('a-cone');
-                cone.setAttribute('color', '#FF5733');
-                cone.setAttribute('height', '0.2');
-                cone.setAttribute('radius-bottom', '0.05');
-                cone.setAttribute('radius-top', '0');
-                
-                const windDirection = this.wind.clone().normalize();
-                cone.object3D.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), windDirection);
-                
-                windIndicator.appendChild(cone);
-
-                const text = document.createElement('a-text');
-                text.setAttribute('value', 'Wind');
-                text.setAttribute('align', 'center');
-                text.setAttribute('position', '0 0.2 0');
-                text.setAttribute('width', '2');
-                windIndicator.appendChild(text);
-            }
+        // wait for model to load so orientation/meshes exist
+        arrow.addEventListener('model-loaded', () => {
+          // orient arrow pointing forward from hand (neg Z forward in A-Frame)
+          // We keep its local orientation; will be updated while drawing
         });
 
-        // Component to manage arrow physics after being shot
-        AFRAME.registerComponent('arrow-physics', {
-            schema: {
-                initialVelocity: {type: 'vec3'},
-                wind: {type: 'vec3'}
-            },
+        this.arrowHandEl.appendChild(arrow);
+        this.currentArrow = arrow;
+        this.state = 'NOCKING';
 
-            init: function () {
-                this.velocity = new THREE.Vector3().copy(this.data.initialVelocity);
-                this.windForce = new THREE.Vector3().copy(this.data.wind);
-                this.stuck = false;
+        if (this.nockSound) { this.nockSound.play(); }
+      },
 
-                this.el.addEventListener('body-loaded', () => {
-                    this.body = this.el.body;
-                    this.body.velocity.copy(this.velocity);
-                    this.body.addEventListener('collide', (e) => {
-                        if (this.stuck) return;
-                        
-                        // Check if it's a target
-                        if (e.body.el.classList.contains('target')) {
-                            this.stickInTarget(e.body.el);
-                        }
-                    });
-                });
-            },
+      tick: (function () {
+        // closure caching for performance
+        const tmpV = new THREE.Vector3();
+        const bowWorldPos = new THREE.Vector3();
+        const arrowHandWorld = new THREE.Vector3();
+        const bowHandWorld = new THREE.Vector3();
 
-            stickInTarget: function(targetEl) {
-                this.stuck = true;
-                this.el.removeAttribute('dynamic-body');
-                
-                // Calculate score
-                const hitPoint = this.el.object3D.position.clone();
-                const targetCenter = targetEl.object3D.position.clone();
-                const distance = hitPoint.distanceTo(targetCenter);
-                
-                let score = 0;
-                if (distance < 0.1) score = 100;
-                else if (distance < 0.2) score = 50;
-                else if (distance < 0.3) score = 25;
-                else if (distance < 0.5) score = 10;
+        return function (time, dt) {
+          if (!this.currentArrow) return;
+          if (this.state === 'NOCKING' || this.state === 'DRAWING') {
+            // compute world space positions
+            this.bowEl.object3D.getWorldPosition(bowWorldPos);
+            this.arrowHandEl.object3D.getWorldPosition(arrowHandWorld);
+            this.bowHandEl.object3D.getWorldPosition(bowHandWorld);
 
-                // Display score
-                const scoreText = document.createElement('a-text');
-                scoreText.setAttribute('value', `${score} pts`);
-                scoreText.setAttribute('position', '0 0.2 0');
-                scoreText.setAttribute('align', 'center');
-                scoreText.setAttribute('color', 'yellow');
-                scoreText.setAttribute('width', '4');
-                this.el.appendChild(scoreText);
+            // distance from arrow-hand to nocking point
+            // approximate nock point a bit in front of bow world pos
+            const nockPoint = bowWorldPos.clone().add(new THREE.Vector3(0,0,0.05).applyQuaternion(this.bowEl.object3D.quaternion));
+            const dist = nockPoint.distanceTo(arrowHandWorld);
 
-                // Make arrow a child of the target to stick to it
-                const worldPos = new THREE.Vector3();
-                const worldQuat = new THREE.Quaternion();
-                this.el.object3D.getWorldPosition(worldPos);
-                this.el.object3D.getWorldQuaternion(worldQuat);
-
-                targetEl.object3D.add(this.el.object3D);
-                
-                const localPos = targetEl.object3D.worldToLocal(worldPos);
-                this.el.object3D.position.copy(localPos);
-            },
-
-            tick: function (time, timeDelta) {
-                if (this.stuck || !this.body) return;
-                
-                // Apply gravity
-                this.body.velocity.y += ARROW_GRAVITY * (timeDelta / 1000);
-
-                // Apply wind
-                this.body.velocity.add(this.windForce.clone().multiplyScalar(timeDelta / 1000));
-                
-                // Arrow alignment with velocity
-                const currentVelocity = this.body.velocity.clone();
-                if (currentVelocity.lengthSq() > 0.001) {
-                    this.el.object3D.quaternion.setFromUnitVectors(
-                        new THREE.Vector3(0, 0, -1),
-                        currentVelocity.normalize()
-                    );
-                }
+            // if close enough and still NOCKING, attach to bow-hand for stable draw
+            if (dist < 0.20 && this.state === 'NOCKING') {
+              this.state = 'DRAWING';
+              if (this.drawSound) { this.drawSound.currentTime = 0; this.drawSound.play(); }
             }
+
+            if (this.state === 'DRAWING') {
+              // compute draw vector along bowHand forward axis
+              const drawVector = arrowHandWorld.clone().sub(bowHandWorld);
+              const forward = new THREE.Vector3(0,0,-1).applyQuaternion(this.bowHandEl.object3D.quaternion);
+              // negative dot because forward points -Z
+              let drawDist = - drawVector.dot(forward);
+              drawDist = Math.max(0, Math.min(drawDist, MAX_DRAW));
+              this.drawDistance = drawDist;
+
+              // move arrow to be at the arrow-hand world position but parented under bowHand to mimic nocked arrow
+              const localPos = this.bowHandEl.object3D.worldToLocal(arrowHandWorld.clone());
+              this.bowHandEl.appendChild(this.currentArrow);
+              // set object3D position so transforms are correct
+              this.currentArrow.object3D.position.copy(localPos);
+
+              // rotate arrow to aim towards camera crosshair direction (or slight lead)
+              const cameraWorldPos = new THREE.Vector3();
+              this.cameraEl.object3D.getWorldPosition(cameraWorldPos);
+              // point arrow toward camera forward (user aims by moving hand)
+              const toCam = cameraWorldPos.clone().sub(this.currentArrow.object3D.getWorldPosition(new THREE.Vector3()));
+              this.currentArrow.object3D.lookAt(cameraWorldPos);
+
+              // update string visual
+              this.updateStringVisual(drawDist);
+
+              // haptic feedback if available (small pulse proportional to draw)
+              if (this.arrowHandEl.components['haptics']) {
+                const intensity = Math.min(0.6, drawDist / MAX_DRAW * 0.6);
+                this.arrowHandEl.components.haptics.pulse(intensity, 30);
+              }
+            }
+          }
+        };
+      })(),
+
+      updateStringVisual: function(draw) {
+        // We simply move the small sphere back along local -Z to represent string being pulled
+        const z = 0.05 - draw; // base position minus draw
+        this.stringCenter.setAttribute('position', `0 0 ${z.toFixed(4)}`);
+      },
+
+      shootArrow: function () {
+        if (!this.currentArrow) return;
+
+        // Determine world transform at moment of release
+        const arrowWorldPos = new THREE.Vector3();
+        const arrowWorldQuat = new THREE.Quaternion();
+        this.currentArrow.object3D.getWorldPosition(arrowWorldPos);
+        this.currentArrow.object3D.getWorldQuaternion(arrowWorldQuat);
+
+        // detach arrow from hand/bow and add to scene root
+        this.sceneEl.appendChild(this.currentArrow);
+        // apply world transform to entity's object3D
+        this.currentArrow.object3D.position.copy(arrowWorldPos);
+        this.currentArrow.object3D.quaternion.copy(arrowWorldQuat);
+
+        // compute velocity based on drawDistance pointing along arrow forward (-Z)
+        const forward = new THREE.Vector3(0,0,-1).applyQuaternion(arrowWorldQuat).normalize();
+        const speed = (this.drawDistance / MAX_DRAW) * SHOT_POWER_MULTIPLIER;
+        const initialVel = forward.multiplyScalar(speed);
+
+        // enable arrow physics component with initial velocity and wind
+        this.currentArrow.setAttribute('arrow-physics', {
+          active: true,
+          velocity: `${initialVel.x} ${initialVel.y} ${initialVel.z}`,
+          wind: `${this.wind.x} ${this.wind.y} ${this.wind.z}`,
+          mass: ARROW_MASS
         });
 
-    </script>
+        if (this.releaseSound) { this.releaseSound.play(); }
+        if (this.drawSound) { this.drawSound.pause(); this.drawSound.currentTime = 0; }
+
+        // reset state
+        this.currentArrow = null;
+        this.state = 'IDLE';
+        this.drawDistance = 0;
+        this.updateStringVisual(0);
+      },
+
+      remove: function () {
+        // cleanup listeners
+        if (this.arrowHandEl) {
+          this.arrowHandEl.removeEventListener('gripdown', this.onGripDown);
+          this.arrowHandEl.removeEventListener('gripup', this.onGripUp);
+        }
+      }
+    });
+
+    // Arrow physics: updates position using simple explicit integration and checks collision with targets
+    AFRAME.registerComponent('arrow-physics', {
+      schema: {
+        active: {type: 'boolean', default: false},
+        velocity: {type: 'vec3', default: {x:0,y:0,z:0}},
+        wind: {type: 'vec3', default: {x:0,y:0,z:0}},
+        mass: {type: 'number', default: 0.05},
+        lifetime: {type: 'number', default: 20000} // ms
+      },
+
+      init: function () {
+        this.velocity = new THREE.Vector3(this.data.velocity.x, this.data.velocity.y, this.data.velocity.z);
+        this.wind = new THREE.Vector3(this.data.wind.x, this.data.wind.y, this.data.wind.z);
+        this.active = this.data.active;
+        this.age = 0;
+        this.stuck = false;
+
+        // cache targets
+        this.targets = Array.from(document.querySelectorAll('.target')).map(t => {
+          // compute center and radii in world space each time we test (targets are static)
+          return t;
+        });
+
+        // Arrow tip offset in local coordinates (assume model forward -Z, tip at -length/2)
+        this.tipOffsetLocal = new THREE.Vector3(0, 0, -ARROW_LENGTH * 0.5);
+      },
+
+      update: function (oldData) {
+        // Update params if changed via setAttribute
+        this.velocity.set(this.data.velocity.x, this.data.velocity.y, this.data.velocity.z);
+        this.wind.set(this.data.wind.x, this.data.wind.y, this.data.wind.z);
+        this.active = this.data.active;
+      },
+
+      tick: (function () {
+        const tmpVec = new THREE.Vector3();
+        const worldTip = new THREE.Vector3();
+        const targetCenter = new THREE.Vector3();
+
+        return function (time, dt) {
+          if (!this.active || this.stuck) return;
+          const delta = dt / 1000; // seconds
+          this.age += dt;
+          if (this.age > this.data.lifetime) {
+            // remove arrow if too old
+            if (this.el.parentNode) this.el.parentNode.removeChild(this.el);
+            return;
+          }
+
+          // Integrate velocity: gravity + wind
+          this.velocity.y += GRAVITY * delta;
+          tmpVec.copy(this.wind).multiplyScalar(delta);
+          this.velocity.add(tmpVec);
+
+          // Integrate position
+          const pos = this.el.object3D.position;
+          pos.x += this.velocity.x * delta;
+          pos.y += this.velocity.y * delta;
+          pos.z += this.velocity.z * delta;
+          this.el.object3D.position.copy(pos);
+
+          // orient arrow to velocity vector (makes it realistic)
+          const velLenSq = this.velocity.lengthSq();
+          if (velLenSq > 1e-6) {
+            const velDir = this.velocity.clone().normalize();
+            // default arrow forward axis is -Z; compute quaternion to rotate -Z to velDir
+            this.el.object3D.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,-1), velDir);
+          }
+
+          // Basic collision: check arrow tip distance to each target center
+          // compute arrow tip world position
+          worldTip.copy(this.tipOffsetLocal).applyQuaternion(this.el.object3D.quaternion).add(this.el.object3D.position);
+
+          for (let tEl of this.targets) {
+            // get target center and approximate bounding radius
+            tEl.object3D.getWorldPosition(targetCenter);
+            // targets are cylinders; radius = max of their geometry radius (we used radius attr)
+            const r = (parseFloat(tEl.getAttribute('radius')) || 0.3) + 0.02;
+
+            const d = worldTip.distanceTo(targetCenter);
+            if (d <= r + 0.02) {
+              // hit!
+              this.onHit(tEl, worldTip);
+              break;
+            }
+          }
+        };
+      })(),
+
+      onHit: function (targetEl, hitPointWorld) {
+        if (this.stuck) return;
+        this.stuck = true;
+        this.active = false;
+
+        // compute local point on target and parent arrow to target to "stick"
+        const worldPos = new THREE.Vector3();
+        const worldQuat = new THREE.Quaternion();
+        this.el.object3D.getWorldPosition(worldPos);
+        this.el.object3D.getWorldQuaternion(worldQuat);
+
+        // attach to target
+        targetEl.object3D.add(this.el.object3D);
+        const localPos = targetEl.object3D.worldToLocal(worldPos);
+        this.el.object3D.position.copy(localPos);
+
+        // small offset so arrow appears embedded (push slightly into target)
+        // compute score by radial distance to target center in target-local space
+        const targetCenter = new THREE.Vector3();
+        targetEl.object3D.getWorldPosition(targetCenter);
+        const dist = hitPointWorld.distanceTo(targetCenter);
+
+        // scoring rings (tuned to radii used in scene)
+        let score = 0;
+        if (dist < 0.12) score = 100;
+        else if (dist < 0.25) score = 50;
+        else if (dist < 0.4) score = 25;
+        else if (dist < 0.6) score = 10;
+
+        // show floating text near hit
+        const t = document.createElement('a-text');
+        t.setAttribute('value', `${score} pts`);
+        t.setAttribute('color', 'yellow');
+        t.setAttribute('align', 'center');
+        t.setAttribute('position', `0 0.2 0`);
+        t.setAttribute('width', '2.5');
+        this.el.appendChild(t);
+
+        // Optionally play a small sound if present on target
+        if (targetEl.components['sound']) {
+          targetEl.components['sound'].playSound();
+        }
+      }
+    });
+  </script>
 </head>
+
 <body>
-    <a-scene physics="driver: local; gravity: 0;" archery-system>
-        <a-assets>
-            <a-asset-item id="bow_model" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/bow.glb?v=1678811394522"></a-asset-item>
-            <a-asset-item id="arrow_model" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/arrow.glb?v=1678811391218"></a-asset-item>
-            <audio id="nock_sound" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/arrow_nock.mp3?v=1678812933181" preload="auto"></audio>
-            <audio id="release_sound" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/bow_release.mp3?v=1678812936752" preload="auto"></audio>
-            <audio id="draw_sound" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/bow_draw.mp3?v=1678812939893" preload="auto" loop="true"></audio>
-            <img id="sky" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/sky.jpg?v=1678813533434">
-            <img id="grass" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/grass.jpg?v=1678813536831">
-        </a-assets>
+  <a-scene embedded background="color: #88ccee" vr-mode-ui="enabled: true">
 
-        <!-- Player Rig -->
-        <a-entity id="player">
-            <a-camera id="camera" position="0 1.6 0">
-                <a-entity cursor="fuse: false;"
-                          position="0 0 -1"
-                          geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03;"
-                          material="color: black; shader: flat"
-                          visible="false">
-                </a-entity>
-            </a-camera>
-            <a-entity id="bow-hand" oculus-touch-controls="hand: left" haptics>
-                <a-entity id="bow" gltf-model="#bow_model" position="0 0 -0.2" rotation="0 90 0" scale="0.04 0.04 0.04">
-                    <!-- Bowstring -->
-                    <a-entity class="bowstring" line="start: 0 1.5 0; end: 0 -1.5 0; color: black" position="0 0 0.05">
-                    </a-entity>
-                </a-entity>
-            </a-entity>
-            <a-entity id="arrow-hand" oculus-touch-controls="hand: right" haptics></a-entity>
-        </a-entity>
+    <a-assets>
+      <!-- keep your assets (replace with your glb/urls as needed) -->
+      <a-asset-item id="bow_model" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/bow.glb?v=1678811394522"></a-asset-item>
+      <a-asset-item id="arrow_model" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/arrow.glb?v=1678811391218"></a-asset-item>
+      <audio id="nock_sound" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/arrow_nock.mp3?v=1678812933181"></audio>
+      <audio id="release_sound" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/bow_release.mp3?v=1678812936752"></audio>
+      <audio id="draw_sound" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/bow_draw.mp3?v=1678812939893"></audio>
+      <img id="sky" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/sky.jpg?v=1678813533434">
+      <img id="grass" src="https://cdn.glitch.global/c01183c0-5683-452c-934c-212a4c138719/grass.jpg?v=1678813536831">
+    </a-assets>
 
-        <!-- Environment -->
-        <a-sky src="#sky"></a-sky>
-        <a-plane src="#grass" repeat="100 100" position="0 0 -4" rotation="-90 0 0" height="100" width="100" static-body></a-plane>
-        
-        <!-- Targets -->
-        <a-cylinder class="target" color="#ff0000" radius="0.5" height="0.1" position="0 1.6 -20" static-body></a-cylinder>
-        <a-cylinder class="target" color="#ffff00" radius="0.3" height="0.1" position="0 1.6 -20.01" static-body></a-cylinder>
-        <a-cylinder class="target" color="#00ff00" radius="0.2" height="0.1" position="0 1.6 -20.02" static-body></a-cylinder>
-        <a-cylinder class="target" color="#0000ff" radius="0.1" height="0.1" position="0 1.6 -20.03" static-body></a-cylinder>
+    <!-- Lighting -->
+    <a-entity light="type: ambient; intensity: 0.8"></a-entity>
+    <a-entity light="type: directional; intensity: 0.6" position="1 2 0"></a-entity>
 
-        <a-cylinder class="target" color="#ff0000" radius="0.5" height="0.1" position="-10 1.6 -40" static-body></a-cylinder>
-        <a-cylinder class="target" color="#ffff00" radius="0.3" height="0.1" position="-10 1.6 -40.01" static-body></a-cylinder>
-        <a-cylinder class="target" color="#00ff00" radius="0.2" height="0.1" position="-10 1.6 -40.02" static-body></a-cylinder>
-        <a-cylinder class="target" color="#0000ff" radius="0.1" height="0.1" position="-10 1.6 -40.03" static-body></a-cylinder>
+    <!-- Player rig -->
+    <a-entity id="player" position="0 0 0" rotation="0 0 0">
+      <a-camera id="camera" position="0 1.65 0">
+        <!-- small reticle for alignment (hidden by default) -->
+        <a-entity geometry="primitive:ring; radiusInner: 0.01; radiusOuter: 0.02" material="color: white; shader: flat" position="0 0 -1" visible="false"></a-entity>
+      </a-camera>
 
-        <a-cylinder class="target" color="#ff0000" radius="0.5" height="0.1" position="15 3 -60" static-body></a-cylinder>
-        <a-cylinder class="target" color="#ffff00" radius="0.3" height="0.1" position="15 3 -60.01" static-body></a-cylinder>
-        <a-cylinder class="target" color="#00ff00" radius="0.2" height="0.1" position="15 3 -60.02" static-body></a-cylinder>
-        <a-cylinder class="target" color="#0000ff" radius="0.1" height="0.1" position="15 3 -60.03" static-body></a-cylinder>
+      <!-- LEFT: Bow hand -->
+      <a-entity id="bow-hand" hand-controls="hand: left; handModelStyle: lowPoly; color: #fff" oculus-touch-controls="hand: left" haptics>
+        <!-- Bow model positioned relative to the left hand -->
+        <a-entity id="bow" gltf-model="#bow_model" position="0 0 -0.2" rotation="0 85 0" scale="0.04 0.04 0.04"></a-entity>
+      </a-entity>
 
-    </a-scene>
+      <!-- RIGHT: Arrow hand -->
+      <a-entity id="arrow-hand" hand-controls="hand: right; handModelStyle: lowPoly; color: #fff" oculus-touch-controls="hand: right" haptics></a-entity>
+    </a-entity>
+
+    <!-- Use our archery system component -->
+    <a-entity archery-system="bow: #bow; bowHand: #bow-hand; arrowHand: #arrow-hand; camera: #camera; arrowModel: #arrow_model; nockSound: #nock_sound; releaseSound: #release_sound; drawSound: #draw_sound"></a-entity>
+
+    <!-- Environment -->
+    <a-sky src="#sky"></a-sky>
+    <a-plane src="#grass" rotation="-90 0 0" height="200" width="200" repeat="50 50" position="0 0 -10"></a-plane>
+
+    <!-- Targets (stacked colored rings implemented as flat cylinders). Class "target" is used for collision checks. -->
+    <a-entity position="0 0 -20">
+      <a-cylinder class="target" color="#ff0000" radius="0.50" height="0.05" position="0 1.60 0"></a-cylinder>
+      <a-cylinder class="target" color="#ffff00" radius="0.30" height="0.06" position="0 1.60 -0.01"></a-cylinder>
+      <a-cylinder class="target" color="#00ff00" radius="0.20" height="0.07" position="0 1.60 -0.02"></a-cylinder>
+      <a-cylinder class="target" color="#0000ff" radius="0.10" height="0.08" position="0 1.60 -0.03"></a-cylinder>
+    </a-entity>
+
+    <!-- farther targets -->
+    <a-entity position="-10 0 -40">
+      <a-cylinder class="target" color="#ff0000" radius="0.50" height="0.05" position="0 1.60 0"></a-cylinder>
+      <a-cylinder class="target" color="#ffff00" radius="0.30" height="0.06" position="0 1.60 -0.01"></a-cylinder>
+      <a-cylinder class="target" color="#00ff00" radius="0.20" height="0.07" position="0 1.60 -0.02"></a-cylinder>
+      <a-cylinder class="target" color="#0000ff" radius="0.10" height="0.08" position="0 1.60 -0.03"></a-cylinder>
+    </a-entity>
+
+    <a-entity position="15 0 -60">
+      <a-cylinder class="target" color="#ff0000" radius="0.50" height="0.05" position="0 3 0"></a-cylinder>
+      <a-cylinder class="target" color="#ffff00" radius="0.30" height="0.06" position="0 3 -0.01"></a-cylinder>
+      <a-cylinder class="target" color="#00ff00" radius="0.20" height="0.07" position="0 3 -0.02"></a-cylinder>
+      <a-cylinder class="target" color="#0000ff" radius="0.10" height="0.08" position="0 3 -0.03"></a-cylinder>
+    </a-entity>
+
+    <!-- small UI text to show instructions -->
+    <a-entity position="-0.6 1.5 -1.2" rotation="0 25 0">
+      <a-text value="Grip right to nock, pull back to draw, release to shoot" color="#222" width="2" align="left"></a-text>
+    </a-entity>
+
+  </a-scene>
 </body>
 </html>
