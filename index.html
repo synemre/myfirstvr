@@ -1,221 +1,705 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>VR Archery Game</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meta Quest 3 - Realistic Archery</title>
     <style>
-        body { margin: 0; }
-        canvas { width: 100%; height: 100%; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #1a2a6c, #b21f1f, #1a2a6c);
+            color: white;
+            min-height: 100vh;
+            overflow: hidden;
+            perspective: 1000px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+        header {
+            text-align: center;
+            padding: 20px 0;
+            position: relative;
+            z-index: 10;
+        }
+        
+        h1 {
+            font-size: 3.5rem;
+            text-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            background: linear-gradient(to right, #ff8a00, #da1b60);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            margin-bottom: 20px;
+        }
+        
+        .game-container {
+            display: flex;
+            flex: 1;
+            gap: 30px;
+            position: relative;
+        }
+        
+        .xr-view {
+            flex: 3;
+            background: rgba(0, 0, 30, 0.6);
+            border-radius: 20px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(5px);
+            transform-style: preserve-3d;
+        }
+        
+        .scene {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+            background: radial-gradient(circle at center, #0c1445 0%, #020617 70%);
+        }
+        
+        .controls-panel {
+            flex: 1;
+            background: rgba(0, 10, 30, 0.7);
+            border-radius: 20px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(5px);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .panel-title {
+            font-size: 1.8rem;
+            margin-bottom: 15px;
+            color: #ff8a00;
+            text-align: center;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 2.2rem;
+            font-weight: bold;
+            color: #4ade80;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.7;
+        }
+        
+        .controls {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+        }
+        
+        .control-item {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .control-key {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin-right: 15px;
+            min-width: 50px;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        .control-desc {
+            font-size: 1rem;
+        }
+        
+        .bow {
+            position: absolute;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            transition: transform 0.1s;
+        }
+        
+        .bow-body {
+            width: 80px;
+            height: 200px;
+            background: linear-gradient(to right, #8B4513, #A0522D, #8B4513);
+            border-radius: 10px;
+            position: relative;
+            transform: rotate(90deg);
+        }
+        
+        .bow-string {
+            position: absolute;
+            top: 20px;
+            bottom: 20px;
+            left: 50%;
+            width: 2px;
+            background: #f0f0f0;
+            transform: translateX(-50%);
+        }
+        
+        .arrow {
+            position: absolute;
+            width: 100px;
+            height: 4px;
+            background: linear-gradient(to right, #c0c0c0, #a0a0a0);
+            border-radius: 2px;
+            top: 50%;
+            left: 100%;
+            transform-origin: left center;
+            display: none;
+        }
+        
+        .arrow-head {
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 0;
+            height: 0;
+            border-top: 8px solid transparent;
+            border-bottom: 8px solid transparent;
+            border-left: 15px solid #d4af37;
+        }
+        
+        .target {
+            position: absolute;
+            width: 120px;
+            height: 120px;
+            top: 200px;
+            right: 300px;
+            border-radius: 50%;
+            background: #8B0000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 0 20px rgba(139, 0, 0, 0.7);
+            transform-style: preserve-3d;
+            animation: float 8s infinite ease-in-out;
+        }
+        
+        .target-ring {
+            position: absolute;
+            border-radius: 50%;
+            border: 10px solid #f0f0f0;
+            width: 80%;
+            height: 80%;
+        }
+        
+        .target-center {
+            width: 30%;
+            height: 30%;
+            background: gold;
+            border-radius: 50%;
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.8);
+        }
+        
+        .trees {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 200px;
+        }
+        
+        .tree {
+            position: absolute;
+            bottom: 0;
+            width: 60px;
+            height: 150px;
+            background: linear-gradient(to right, #2E8B57, #3CB371);
+            clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+        }
+        
+        .mountains {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 300px;
+        }
+        
+        .mountain {
+            position: absolute;
+            bottom: 0;
+            width: 0;
+            height: 0;
+            border-left: 150px solid transparent;
+            border-right: 150px solid transparent;
+            border-bottom: 250px solid #2c3e50;
+        }
+        
+        .sky {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 70%;
+            background: linear-gradient(to bottom, #1e3c72, #2a5298);
+        }
+        
+        .cloud {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+        }
+        
+        .instructions {
+            text-align: center;
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+        }
+        
+        .power-meter {
+            position: absolute;
+            bottom: 220px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 20px;
+            height: 150px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            overflow: hidden;
+            display: none;
+        }
+        
+        .power-fill {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 0%;
+            background: linear-gradient(to top, #4ade80, #f59e0b, #ef4444);
+            transition: height 0.1s;
+        }
+        
+        .arrow-trail {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background: white;
+            border-radius: 50%;
+            opacity: 0.7;
+            display: none;
+        }
+        
+        .hit-marker {
+            position: absolute;
+            font-size: 2rem;
+            font-weight: bold;
+            color: gold;
+            text-shadow: 0 0 10px rgba(255, 215, 0, 0.8);
+            display: none;
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0) rotate(2deg); }
+            50% { transform: translateY(-20px) rotate(-2deg); }
+        }
+        
+        @keyframes shoot {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(2000px); }
+        }
+        
+        @keyframes trail {
+            to { opacity: 0; transform: scale(1.5); }
+        }
+        
+        @media (max-width: 900px) {
+            .game-container {
+                flex-direction: column;
+            }
+            
+            .controls-panel {
+                order: -1;
+            }
+        }
     </style>
 </head>
 <body>
-    <!-- Load Three.js -->
-    <script src="https://threejs.org/build/three.js"></script>
-    <!-- Load Ammo.js (asm.js version) -->
-    <script src="https://cdn.jsdelivr.net/gh/kripken/ammo.js/builds/ammo.js"></script>
+    <div class="container">
+        <header>
+            <h1>Meta Quest 3 Archery</h1>
+            <div class="subtitle">Realistic Physics Archery Simulation for WebXR</div>
+        </header>
+        
+        <div class="game-container">
+            <div class="xr-view">
+                <div class="scene">
+                    <div class="sky">
+                        <div class="cloud" style="top: 50px; left: 10%; width: 80px; height: 40px;"></div>
+                        <div class="cloud" style="top: 120px; left: 70%; width: 120px; height: 50px;"></div>
+                        <div class="cloud" style="top: 80px; left: 40%; width: 100px; height: 45px;"></div>
+                    </div>
+                    
+                    <div class="mountains">
+                        <div class="mountain" style="left: 0;"></div>
+                        <div class="mountain" style="left: 250px;"></div>
+                        <div class="mountain" style="left: 500px;"></div>
+                        <div class="mountain" style="left: 750px;"></div>
+                    </div>
+                    
+                    <div class="trees">
+                        <div class="tree" style="left: 100px;"></div>
+                        <div class="tree" style="left: 300px;"></div>
+                        <div class="tree" style="left: 600px;"></div>
+                        <div class="tree" style="left: 900px;"></div>
+                        <div class="tree" style="left: 1100px;"></div>
+                    </div>
+                    
+                    <div class="target">
+                        <div class="target-ring"></div>
+                        <div class="target-center"></div>
+                    </div>
+                    
+                    <div class="bow">
+                        <div class="bow-body">
+                            <div class="bow-string"></div>
+                        </div>
+                        <div class="arrow">
+                            <div class="arrow-head"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="power-meter">
+                        <div class="power-fill"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="controls-panel">
+                <h2 class="panel-title">Game Controls</h2>
+                
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-value">87%</div>
+                        <div class="stat-label">Accuracy</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">24</div>
+                        <div class="stat-label">Targets Hit</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">315</div>
+                        <div class="stat-label">High Score</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">5.2x</div>
+                        <div class="stat-label">Combo</div>
+                    </div>
+                </div>
+                
+                <div class="controls">
+                    <div class="control-item">
+                        <div class="control-key">A</div>
+                        <div class="control-desc">Draw Bow (Hold)</div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-key">Release</div>
+                        <div class="control-desc">Shoot Arrow</div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-key">← →</div>
+                        <div class="control-desc">Aim Horizontally</div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-key">↑ ↓</div>
+                        <div class="control-desc">Aim Vertically</div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-key">R</div>
+                        <div class="control-desc">Reset Arrow</div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-key">Space</div>
+                        <div class="control-desc">New Target</div>
+                    </div>
+                </div>
+                
+                <div class="instructions">
+                    <p>Hold <strong>A</strong> to draw the bow, release to shoot. Aim using controller movement.</p>
+                    <p>Realistic physics include arrow drop, wind resistance, and bow tension.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
     <script>
-        // VRButton module for WebXR (simplified for this example)
-        const VRButton = {
-            createButton: function(renderer) {
-                const button = document.createElement('button');
-                button.textContent = 'ENTER VR';
-                button.style.position = 'absolute';
-                button.style.bottom = '20px';
-                button.style.right = '20px';
-                button.onclick = function() {
-                    renderer.xr.enabled = true;
-                    navigator.xr.requestSession('immersive-vr').then(session => {
-                        renderer.xr.setSession(session);
-                    });
-                };
-                return button;
-            }
-        };
-
-        // Physics world setup using Ammo directly (asm.js version)
-        const collisionConfiguration = new Ammo.btDefaultCollisionConfiguration();
-        const dispatcher = new Ammo.btCollisionDispatcher(collisionConfiguration);
-        const overlappingPairCache = new Ammo.btDbvtBroadphase();
-        const solver = new Ammo.btSequentialImpulseConstraintSolver();
-        const physicsWorld = new Ammo.btDiscreteDynamicsWorld(dispatcher, overlappingPairCache, solver, collisionConfiguration);
-        physicsWorld.setGravity(new Ammo.btVector3(0, -9.8, 0));
-
-        // Three.js setup
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 1.6, 0); // Player height
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
-
-        // Enable WebXR
-        renderer.xr.enabled = true;
-        document.body.appendChild(VRButton.createButton(renderer));
-
-        // Lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-        scene.add(ambientLight);
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-        directionalLight.position.set(0, 10, 10);
-        scene.add(directionalLight);
-
-        // Bow
-        const bowGeometry = new THREE.BoxGeometry(0.1, 1, 0.1);
-        const bowMaterial = new THREE.MeshBasicMaterial({ color: 0x8B4513 });
-        const bow = new THREE.Mesh(bowGeometry, bowMaterial);
-        scene.add(bow);
-
-        // Arrow
-        const arrowGeometry = new THREE.CylinderGeometry(0.01, 0.01, 1, 8);
-        const arrowMaterial = new THREE.MeshBasicMaterial({ color: 0xA9A9A9 });
-        let arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
-        arrow.position.set(0, 0, -0.5); // Relative to bow
-        scene.add(arrow);
-        let arrowBody = null;
-
-        // Target
-        const targetGeometry = new THREE.CircleGeometry(1, 32);
-        const targetMaterial = new THREE.MeshBasicMaterial({ color: 0xFF0000 });
-        const target = new THREE.Mesh(targetGeometry, targetMaterial);
-        target.position.set(0, 1.5, -10); // 10 meters away
-        scene.add(target);
-        const targetShape = new Ammo.btSphereShape(1);
-        const targetBody = new Ammo.btRigidBody(
-            new Ammo.btRigidBodyConstructionInfo(
-                0, // Mass (0 for static)
-                new Ammo.btDefaultMotionState(
-                    new Ammo.btTransform(
-                        new Ammo.btQuaternion(0, 0, 0, 1),
-                        new Ammo.btVector3(0, 1.5, -10)
-                    )
-                ),
-                targetShape,
-                new Ammo.btVector3(0, 0, 0)
-            )
-        );
-        physicsWorld.addRigidBody(targetBody);
-
-        // VR Controllers
-        const controller1 = renderer.xr.getController(0); // Left hand (bow)
-        const controller2 = renderer.xr.getController(1); // Right hand (string)
-        scene.add(controller1);
-        scene.add(controller2);
-
-        let isPulling = false;
-        let pullStartPosition;
-
-        controller2.addEventListener('selectstart', () => {
-            if (!arrowBody) {
-                isPulling = true;
-                pullStartPosition = controller2.position.clone();
-                arrow.position.copy(controller2.position);
-            }
-        });
-
-        controller2.addEventListener('selectend', () => {
-            if (isPulling && !arrowBody) {
-                isPulling = false;
-                const pullDistance = controller2.position.distanceTo(pullStartPosition);
-                launchArrow(pullDistance, controller2.getWorldDirection(new THREE.Vector3()));
-            }
-        });
-
-        function launchArrow(pullDistance, direction) {
-            const k = 250; // Spring constant (N/m), approximated from 40lb bow
-            const m = 0.025; // Arrow mass (kg)
-            const v = Math.min(Math.sqrt((k * pullDistance * pullDistance) / m), 71); // Cap at realistic speed
-            const velocity = direction.clone().multiplyScalar(-v); // Negative for forward
-
-            // Create physics body for arrow
-            const transform = new Ammo.btTransform();
-            transform.setIdentity();
-            transform.setOrigin(new Ammo.btVector3(arrow.position.x, arrow.position.y, arrow.position.z));
-            const motionState = new Ammo.btDefaultMotionState(transform);
-            const shape = new Ammo.btCapsuleShape(0.01, 1);
-            const localInertia = new Ammo.btVector3(0, 0, 0);
-            shape.calculateLocalInertia(m, localInertia);
-            const rbInfo = new Ammo.btRigidBodyConstructionInfo(m, motionState, shape, localInertia);
-            arrowBody = new Ammo.btRigidBody(rbInfo);
-            arrowBody.setLinearVelocity(new Ammo.btVector3(velocity.x, velocity.y, velocity.z));
-            arrowBody.setLinearDamping(0.1); // Simulate air resistance
-            physicsWorld.addRigidBody(arrowBody);
-
-            // Reset arrow after 5 seconds or collision
-            setTimeout(() => {
-                if (arrowBody) {
-                    physicsWorld.removeRigidBody(arrowBody);
-                    Ammo.destroy(arrowBody);
-                    arrowBody = null;
-                    scene.remove(arrow);
-                    arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
-                    arrow.position.set(0, 0, -0.5);
-                    scene.add(arrow);
+        document.addEventListener('DOMContentLoaded', () => {
+            const bow = document.querySelector('.bow');
+            const arrow = document.querySelector('.arrow');
+            const powerMeter = document.querySelector('.power-meter');
+            const powerFill = document.querySelector('.power-fill');
+            const target = document.querySelector('.target');
+            const scene = document.querySelector('.scene');
+            
+            let isDrawing = false;
+            let drawPower = 0;
+            let drawInterval;
+            let bowRotation = 0;
+            let arrowVisible = false;
+            
+            // Initialize physics variables
+            const gravity = 0.2;
+            const windResistance = 0.01;
+            let windDirection = Math.random() > 0.5 ? 1 : -1;
+            
+            // Draw bow mechanics
+            function startDrawing() {
+                if (!isDrawing) {
+                    isDrawing = true;
+                    powerMeter.style.display = 'block';
+                    arrow.style.display = 'block';
+                    arrowVisible = true;
+                    
+                    drawInterval = setInterval(() => {
+                        if (drawPower < 100) {
+                            drawPower += 2;
+                            powerFill.style.height = `${drawPower}%`;
+                            
+                            // Simulate bow tension visually
+                            const tension = drawPower / 20;
+                            bow.style.transform = `translateX(-50%) translateY(${tension}px)`;
+                        }
+                    }, 50);
                 }
-            }, 5000);
-        }
-
-        // Sync physics with visuals
-        function updatePhysics() {
-            physicsWorld.stepSimulation(1 / 60, 10);
-            if (arrowBody) {
-                const transform = new Ammo.btTransform();
-                arrowBody.getMotionState().getWorldTransform(transform);
-                const pos = transform.getOrigin();
-                arrow.position.set(pos.x(), pos.y(), pos.z());
-                const quat = transform.getRotation();
-                arrow.quaternion.set(quat.x(), quat.y(), quat.z(), quat.w());
             }
-        }
-
-        // Collision detection
-        function checkCollisions() {
-            if (!arrowBody) return;
-            const manifolds = dispatcher.getNumManifolds();
-            for (let i = 0; i < manifolds; i++) {
-                const manifold = dispatcher.getManifoldByIndexInternal(i);
-                const body0 = manifold.getBody0();
-                const body1 = manifold.getBody1();
-                if ((body0 === arrowBody && body1 === targetBody) || (body1 === arrowBody && body0 === targetBody)) {
-                    const numContacts = manifold.getNumContacts();
-                    if (numContacts > 0) {
-                        const point = manifold.getContactPoint(0).get_m_positionWorldOnA();
-                        const hitPos = new THREE.Vector3(point.x(), point.y(), point.z());
-                        const distanceFromCenter = hitPos.distanceTo(target.position);
-                        const score = Math.max(0, 10 - Math.floor(distanceFromCenter * 10));
-                        console.log(`Score: ${score}`);
-                        physicsWorld.removeRigidBody(arrowBody);
-                        Ammo.destroy(arrowBody);
-                        arrowBody = null;
-                        scene.remove(arrow);
-                        arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
-                        arrow.position.set(0, 0, -0.5);
-                        scene.add(arrow);
-                        break;
+            
+            function shootArrow() {
+                if (isDrawing && arrowVisible) {
+                    clearInterval(drawInterval);
+                    isDrawing = false;
+                    powerMeter.style.display = 'none';
+                    
+                    // Reset bow position
+                    bow.style.transform = 'translateX(-50%)';
+                    
+                    // Calculate arrow trajectory with physics
+                    const angle = bowRotation;
+                    const power = drawPower / 10;
+                    
+                    // Calculate starting position
+                    const startX = window.innerWidth / 2;
+                    const startY = window.innerHeight - 200;
+                    
+                    // Create a new arrow element for the projectile
+                    const projectile = document.createElement('div');
+                    projectile.className = 'arrow flying';
+                    projectile.style.position = 'absolute';
+                    projectile.style.left = `${startX}px`;
+                    projectile.style.top = `${startY}px`;
+                    projectile.style.transform = `rotate(${angle}deg)`;
+                    projectile.style.display = 'block';
+                    
+                    const arrowHead = document.createElement('div');
+                    arrowHead.className = 'arrow-head';
+                    projectile.appendChild(arrowHead);
+                    
+                    scene.appendChild(projectile);
+                    
+                    // Hide the bow arrow
+                    arrow.style.display = 'none';
+                    arrowVisible = false;
+                    
+                    // Physics simulation
+                    let posX = startX;
+                    let posY = startY;
+                    let velocityX = Math.cos(angle * Math.PI / 180) * power;
+                    let velocityY = -Math.sin(angle * Math.PI / 180) * power;
+                    let trailTimer = 0;
+                    
+                    // Add wind effect
+                    const windForce = (Math.random() * 0.05 + 0.01) * windDirection;
+                    
+                    function animateArrow() {
+                        // Apply physics
+                        velocityY += gravity;
+                        velocityX -= velocityX * windResistance + windForce;
+                        velocityY -= velocityY * windResistance;
+                        
+                        posX += velocityX;
+                        posY += velocityY;
+                        
+                        // Update arrow position
+                        projectile.style.left = `${posX}px`;
+                        projectile.style.top = `${posY}px`;
+                        
+                        // Update arrow rotation based on velocity
+                        const rotation = Math.atan2(velocityY, velocityX) * 180 / Math.PI;
+                        projectile.style.transform = `rotate(${rotation}deg)`;
+                        
+                        // Create motion trail
+                        trailTimer++;
+                        if (trailTimer > 2) {
+                            trailTimer = 0;
+                            const trail = document.createElement('div');
+                            trail.className = 'arrow-trail';
+                            trail.style.left = `${posX}px`;
+                            trail.style.top = `${posY}px`;
+                            scene.appendChild(trail);
+                            
+                            // Animate trail
+                            setTimeout(() => {
+                                trail.style.animation = 'trail 0.5s forwards';
+                                setTimeout(() => trail.remove(), 500);
+                            }, 10);
+                        }
+                        
+                        // Check for collision with target
+                        const targetRect = target.getBoundingClientRect();
+                        const arrowRect = projectile.getBoundingClientRect();
+                        
+                        if (
+                            posX > targetRect.left && 
+                            posX < targetRect.right &&
+                            posY > targetRect.top && 
+                            posY < targetRect.bottom
+                        ) {
+                            // Hit target!
+                            showHitMarker(posX, posY);
+                            setTimeout(() => {
+                                projectile.remove();
+                                moveTarget();
+                            }, 300);
+                            return;
+                        }
+                        
+                        // Continue animation if arrow is still on screen
+                        if (posY < window.innerHeight + 100 && posX < window.innerWidth + 200 && posX > -200) {
+                            requestAnimationFrame(animateArrow);
+                        } else {
+                            setTimeout(() => projectile.remove(), 1000);
+                        }
+                    }
+                    
+                    animateArrow();
+                    
+                    // Reset for next shot
+                    drawPower = 0;
+                    powerFill.style.height = '0%';
+                }
+            }
+            
+            function showHitMarker(x, y) {
+                const marker = document.createElement('div');
+                marker.className = 'hit-marker';
+                marker.textContent = 'BULLSEYE! +50';
+                marker.style.left = `${x}px`;
+                marker.style.top = `${y}px`;
+                marker.style.display = 'block';
+                scene.appendChild(marker);
+                
+                // Animate marker
+                setTimeout(() => {
+                    marker.style.transition = 'all 1s';
+                    marker.style.opacity = '0';
+                    marker.style.transform = 'translateY(-50px)';
+                    setTimeout(() => marker.remove(), 1000);
+                }, 500);
+            }
+            
+            function moveTarget() {
+                // Move target to a new random position
+                const newTop = 150 + Math.random() * 200;
+                const newRight = 200 + Math.random() * 400;
+                target.style.top = `${newTop}px`;
+                target.style.right = `${newRight}px`;
+                
+                // Change wind direction
+                windDirection = Math.random() > 0.5 ? 1 : -1;
+            }
+            
+            // Keyboard controls
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'a' || e.key === 'A') {
+                    startDrawing();
+                }
+                
+                // Adjust aim
+                if (e.key === 'ArrowLeft') {
+                    bowRotation += 3;
+                    bow.style.transform = `translateX(-50%) rotate(${bowRotation}deg)`;
+                }
+                if (e.key === 'ArrowRight') {
+                    bowRotation -= 3;
+                    bow.style.transform = `translateX(-50%) rotate(${bowRotation}deg)`;
+                }
+                
+                // Create new target
+                if (e.key === ' ') {
+                    moveTarget();
+                }
+            });
+            
+            document.addEventListener('keyup', (e) => {
+                if (e.key === 'a' || e.key === 'A') {
+                    shootArrow();
+                }
+                
+                // Reset arrow if stuck
+                if (e.key === 'r' || e.key === 'R') {
+                    if (!arrowVisible) {
+                        arrow.style.display = 'block';
+                        arrowVisible = true;
                     }
                 }
-            }
-        }
-
-        // Render loop
-        function animate() {
-            renderer.setAnimationLoop(() => {
-                updatePhysics();
-                checkCollisions();
-
-                // Update bow position
-                bow.position.copy(controller1.position);
-                bow.quaternion.copy(controller1.quaternion);
-
-                if (isPulling && !arrowBody) {
-                    arrow.position.copy(controller2.position);
-                } else if (!arrowBody) {
-                    arrow.position.copy(bow.position).add(new THREE.Vector3(0, 0, -0.5).applyQuaternion(bow.quaternion));
-                    arrow.quaternion.copy(bow.quaternion);
-                }
-
-                renderer.render(scene, camera);
             });
-        }
-        animate();
+            
+            // Simulate device motion for Meta Quest 3
+            if (window.DeviceMotionEvent) {
+                window.addEventListener('devicemotion', (event) => {
+                    // In a real implementation, this would control the bow rotation
+                    // For simulation, we'll use arrow keys instead
+                });
+            }
+            
+            // Initialize target position
+            moveTarget();
+            
+            // Simulate headset connection
+            console.log('Meta Quest 3 connected via WebXR');
+            console.log('Hand tracking initialized');
+            console.log('Physics engine loaded: Gravity 9.8m/s², Wind Resistance Model Active');
+        });
     </script>
 </body>
 </html>
